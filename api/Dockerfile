@@ -1,10 +1,9 @@
 FROM node:alpine
-WORKDIR /app
-COPY . /app
+WORKDIR /api
+COPY . /api
 COPY package.json .
-# ENV PATH="./node_modules/.bin:$PATH"
 RUN npm install
 COPY . .
-EXPOSE 3000
+EXPOSE 5000
 # RUN npm run build
 CMD ["npm", "start"]
