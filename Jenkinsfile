@@ -3,21 +3,17 @@ pipeline {
   options {
     buildDiscarder(logRotator(numToKeepStr: '5'))
   }
-  // environment {
-  //   HEROKU_API_KEY = credentials('heroku-api-key')
-  //   IMAGE_NAME = 'venkat/ci-cd-app'
-  //   IMAGE_TAG = 'latest'
-  //   APP_NAME = 'ci-cd-app'
-  // }
+  environment {
+    HEROKU_API_KEY = credentials('heroku-api-key')
+    IMAGE_NAME = 'venkat/ci-cd-app'
+    IMAGE_TAG = 'latest'
+    APP_NAME = 'ci-cd-app'
+  }
   stages {
-    stage('Tooling versions') {
+    stage('Build') {
       steps {
-        sh '''
-          docker --version
-          docker compose version
-        '''
+        sh 'npm run build'
       }
     }
-  }
    
 }
