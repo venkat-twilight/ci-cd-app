@@ -1,19 +1,11 @@
-pipeline {
-  agent any
-  options {
-    buildDiscarder(logRotator(numToKeepStr: '5'))
-  }
-  environment {
-    HEROKU_API_KEY = credentials('heroku-api-key')
-    IMAGE_NAME = 'venkat/ci-cd-app'
-    IMAGE_TAG = 'latest'
-    APP_NAME = 'ci-cd-app'
-  }
-  stages {
-    stage('Build') {
-      steps {
-        sh 'npm run build'
-      }
-    }
-   
-}
+@Library('GTSO-CI-Jenkins-Library@dev') _
+def build_config = [
+    build_config: "build-info.yaml",
+    snapshot_branch: "dev*",
+    integration_branch: "integration*",
+    verify_branch: "verify*",
+    prod_branch: "dev*",
+    deployment_configs: "deployment",
+    jenkins_node_label: "jenkins_seo",
+]
+sboPipeline(this, build_config)

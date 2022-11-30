@@ -1,0 +1,295 @@
+#parentFile: "teams/sbo-base-build-info.yaml"
+serviceName: 'cicd-jenkins'
+
+#*********************** Configuration for Jenkins autocleanup ***********************#                      #
+
+jenkins:
+  autocleanup: true
+  data_kept_older_than: "100"
+
+#************* MANDATORY !!Configuration for Product Hierarchy Info ********************#  
+    
+product_hierarchy_info:
+  business_unit: "SBO"
+  product: "gtso-cicd-helm-helloworld"
+  component: "gtso-cicd-helm-helloworld"
+  team: "seo" 
+
+#************* MANDATORY !!! Configuration for Credentials ********************#  
+      
+credentials:
+  git: BROADCOM
+  jenkins: jenkins-api-token
+  jfrog: jfrog-artifact
+  # gcp_kms_credentials: "SA-KMS-cosign-ci-demo"
+  jfrog_artifactory:
+    artifactory-lvn.broadcom.net:
+      sbo-cicd-docker-release-local : jfrog-artifact
+      sbo-cicd-docker-dev-local : jfrog-artifact
+    artifactory-ren.broadcom.net:
+      nis-hsebloc-docker-virtual: "jfrog-artifact"
+
+#********************* Configuration for Cosign  ***************** #
+
+cosign:
+  enabled: false
+  public_keys:
+    - "projects/sccstgl-saas-gke1-1/locations/global/keyRings/gto-devops-cosign/cryptoKeys/cosign-ci-demo/versions/1"
+
+#****************************#
+#          Pipeline 2.0      #
+#****************************#
+
+skipPipeline:
+  enableBuildNow: true/false
+
+pipeline:
+
+  version:
+    command: "mvn versions:set -DnewVersion=$version -DprocessAllModules -DoldVersion='*'"
+    type: tag
+    increment: true
+    tag: true
+    commit: true  
+    
+  build:
+    steps:  
+      - name: Code Build
+        stageName: "Code Build"
+        type: genericCode
+        enabled: true
+        inputs: []
+        source: .
+#         artifact_type: "mvn"
+        image:
+          name: "stage runner image"
+          docker_run_params: "docker run parameters"
+        commands:
+            - "build command"
+            - "copy all the publish artifacts to a folder"
+
+      - name: docker image name
+        stageName: "Docker Build 1"
+        type: genericDocker
+        imageName: [serviceName]
+        enabled: false
+        inputs: [Code Build]
+        Dockerfile_dir: .
+        Dockerfile_name: Dockerfile
+        pre_steps:
+          - echo "Any step before docker build"
+        tag: 1.1.1
+        snapshot_tag: 1.1.1-snapshot
+        post_steps:
+          - echo "Any step after docker build"
+#         disableBlackDuckScan: true
+      
+      - name: Helm-Build
+        stageName: "Helm Build-1"
+        type: genericHelm
+        enabled: false
+        inputs: [Code Build]
+        image:
+          name: sbo-cicd-docker-release-local.artifactory-lvn.broadcom.net/broadcom-custom-images/centos/8/helm:latest
+          docker_run_params:
+        helm_dir: mychart
+        tag: 1.0.11
+        snapshot_tag: 192.168.11
+        commands:
+          - helm lint
+          - helm package .   
+        
+  test:
+    steps:
+      - name: Code Unit Test
+        stageName: "Code Test"
+        type: GenericCode
+        enabled: false
+        inputs: [Code Build]
+        source: "."
+        image:
+          name: "stage runner image"
+          docker_run_params: "docker run parameters"
+        commands:
+          - "mvn test"
+                     
+  publish:
+    steps:
+      - name: Helm Publish
+        stageName: "Publish Helm charts"
+        type: genericHelm 
+        inputs: [Helm-Build]
+        enabled: false
+        snapshot: https://artifactory-lvn.broadcom.net/artifactory/sbo-cicd-helm-dev-local/std-cicd-helm-helloworld/snapshot
+        integration: https://artifactory-lvn.broadcom.net/artifactory/sbo-cicd-helm-dev-local/std-cicd-helm-helloworld/integration
+        verify: https://artifactory-lvn.broadcom.net/artifactory/sbo-cicd-helm-dev-local/std-cicd-helm-helloworld/verify
+        prod: https://artifactory-lvn.broadcom.net/artifactory/sbo-cicd-helm-release-local/std-cicd-helm-helloworld/master
+   
+      - name: Docker Publish
+        stageName: "Publish Docker Image"
+        type: genericDocker
+        inputs: [saaspoc-base-helloworld]
+        enabled: false
+        snapshot: sbo-cicd-docker-release-local.artifactory-lvn.broadcom.net/std-cicd-helm-helloworld/snapshot
+        integration: sbo-cicd-docker-release-local.artifactory-lvn.broadcom.net/std-cicd-helm-helloworld/integration
+        verify: sbo-cicd-docker-release-local.artifactory-lvn.broadcom.net/std-cicd-helm-helloworld/verify
+        prod: sbo-cicd-docker-release-local.artifactory-lvn.broadcom.net/std-cicd-helm-helloworld/prod
+        
+      - name: Artifacts Publish
+        stageName: "Publish Artifacts"
+        type: genericArtifact
+        # artifact_location: "" // needed for other types of artifacts
+        # artifact_tag: 1.0.0   // needed for other types of artifacts promotion
+        inputs: [Code Build]
+        enabled: true
+        snapshot: https://artifactory-lvn.broadcom.net/artifactory/sbo-cicd-maven-dev-local
+        integration: https://artifactory-lvn.broadcom.net/artifactory/sbo-cicd-maven-dev-local
+        verify: https://artifactory-lvn.broadcom.net/artifactory/sbo-cicd-maven-release-local
+        prod: https://artifactory-lvn.broadcom.net/artifactory/sbo-cicd-maven-release-local
+     
+  quality:
+    steps: 
+      - name: blackduck
+        stageName: "Code Scan - BlackDuck"
+        type: blackduck
+        inputs: []
+        enabled: false
+        blackduck_instance_token: blackduck-test-token
+        blackduck_instance_url: https://broadcom-test.app.blackduck.com        
+        quality_gate:
+          enabled: false
+          timeout: 1001 #in Seconds		    
+          severity_threshold: MAJOR
+        image:
+            name: "sbo-cicd-docker-release-local.artifactory-lvn.broadcom.net/broadcom-custom-images-legacy/centos/8/blackduck:latest"
+            docker_run_params: '-v $HOME/.m2:/root/.m2'
+        full_scan: "yes"
+        project_name: "CI_CD_Pipeline"
+        project_version: "dev-scan"
+        project_version_phase: "DEVELOPMENT"
+        scan_branches:
+          branches_with_default_version: snapshot_branch1,snapshot_branch2,snapshot_branch3
+          feature-blackduck-test: snapshot_branch1
+        custom_attributes: "--detect.project.description"
+        scan_folders: ""
+        image_scan:
+          enabled: false
+  
+      - name: coverity
+        stageName: "Code Scan - Coverity"
+        inputs: []
+        type: coverity
+        enabled: false
+        quality_gate:
+          enabled: false
+          high: 30
+          medium: 30
+          low: 30
+        image:    
+          name: "sbo-cicd-docker-release-local.artifactory-lvn.broadcom.net/broadcom-custom-images/centos/8/coverity:latest"
+        project_name: "CICD-Library"
+        stream_name: "CICD-QG-Stream-again-quotes"
+        view_name: "Outstanding Untriaged"
+        enablePRScan: true
+        base_branch: dev
+        full_scan_branches: "non-integration branch name" 
+        coverity_instance_url: "https://cov-ren-01.ren.broadcom.net:8443"
+        create_missing_project_and_streams: "true"
+        full_scan: "yes" 
+        coverity_configure_command: "--java"
+        coverity_build_command: "cov-capture --project-dir ."
+        coverity_checkers_file: ""
+        pre_build:
+          - echo "any command can be executed that needs to done before build"
+        post_build:
+          -  echo "any command can be executed that needs to done after build" 
+        post_analyse:
+          - echo "any command can be executed that needs to done after analyse"
+
+      - name: sonar
+        stageName: "Code Scan - Sonar"
+        type: sonar
+        inputs: [Code Build]
+        enabled: false
+        quality_gate:
+         enabled: false
+         timeout: 10 #IN MINUTES
+        sonarqube_server_name: "sonarqube-prod"
+        sonar_runnner_tools_name: "sonarscanner"
+        full_scan: "yes"
+        base_branch: "dev"
+        image:
+          name: sbo-cicd-docker-release-local.artifactory-lvn.broadcom.net/broadcom-custom-images-legacy/centos/8/sonar:latest
+          docker_run_params: -v /tmp:/tmp
+        sonar_conf:
+        -   sonar.projectKey: cicd-jenkins
+            sonar.projectName: cicd-jenkins
+            sonar.projectVersion: 2.0
+            sonar.sources: resources
+            sonar.language: java
+            sonar.java.binaries: target/classes 
+            sonar.sourceEncoding : UTF-8
+            sonar.web.host: https://sonarqube.broadcom.net
+            sonar.web.port: 443      
+            sonar.login: sonar_prod_auth        
+      
+  deploy:
+    steps:
+      - name: Deploy Initialization
+        stageName: "Deploy"
+        type: generic
+        inputs: [Helm Publish, Docker Publish, Artifacts Publish]
+        enabled: false
+        deploy: "false"
+        # entrypoint: job
+        image:
+          name: "sbo-cicd-docker-release-local.artifactory-lvn.broadcom.net/broadcom-custom-images/centos/8/git:latest"
+          docker_run_params: "-v /tmp/gitssh:$HOME/.ssh"
+        cd_repo_snapshot: https://github.gwd.broadcom.net/dockcpdev/gtso-helm-helloworld.git
+        cd_repo_integration: https://github.gwd.broadcom.net/dockcpdev/gtso-helm-helloworld.git
+        cd_repo_verify: https://github.gwd.broadcom.net/dockcpdev/gtso-helm-helloworld.git
+        cd_repo_prod: https://github.gwd.broadcom.net/dockcpdev/gtso-helm-helloworld.git 
+        cd_git_credentials_snapshot: BROADCOM
+        cd_git_credentials_integration: BROADCOM
+        cd_git_credentials_verify: BROADCOM
+        cd_git_credentials_prod: BROADCOM
+        cd_git_user:
+          name: "Jenkins Worker"
+          email: "rishita.reddy@broadcom.com"
+#This section will auto-populate the value of email in deploy-info. User can either provide a value or use <@current-user> to get the email ID associated with the git commit.   
+#The change request section will auto-populate the values in deploy-info file, if present. This is only applicable for the prod environment.
+        change_request:
+          type: "Normal"
+          customer_impact: "No"
+          risk_level: "Medium"
+          service_id: "t3st"
+          change_comment: "Non-breaking"
+          email: "test@broadcom.com"
+          product_approval_auth: gz037849
+          saas_service_owner_email: "test@broadcom.com"
+          saas_service_owner_approval_auth: cv01191
+        environments:
+          snapshot:
+            - gke: sccstglsaasgke1
+              namespace: test-snapshot-namespace
+              partitions:
+                - folder: cp1
+                  namespace: my-partition-namespace1
+                - folder: cp2
+                  namespace: my-partition-namespace2
+          integration:
+            - gke: sccstglsaasgke1
+              namespace: test-integration-namespace
+          verify:
+            - gke: sccstglsaasgke1
+              cd_prefix: test1
+              namespace: test-verify-namespace
+          prod:
+            - gke: sccstglsaasgke1
+              cd_prefix: test1
+              namespace: test-prod-namespace
+        integration_test:
+          skip_integration_test: "yes"
+          quality_gate: 
+            enabled: false
+            timeout: 10
